@@ -258,7 +258,7 @@ def test_evidence_sufficiency_passes_when_at_least_one_chunk_meets_score():
     assert result["evidence_sufficient"] is True
 
 
-def test_check_evidence_sufficiency_node_sets_refused_status_when_weak():
+def test_check_evidence_sufficiency_node_records_weak_evidence_for_routing():
     state = {
         "evidence_chunks": [],
         "min_reranker_score": None,
@@ -267,10 +267,8 @@ def test_check_evidence_sufficiency_node_sets_refused_status_when_weak():
     result = check_evidence_sufficiency_node(state)
 
     assert result["evidence_sufficient"] is False
-    assert result["status"] == "refused"
-    assert result["validation_status"] == "unsupported"
-    assert result["citations"] == []
-    assert "could not find enough evidence" in result["generated_answer"].lower()
+    assert result["evidence_sufficiency_reason"] == "No evidence chunks were retrieved."
+    assert "status" not in result
 
 
 def test_generate_answer_node_skips_llm_when_status_refused(monkeypatch):
@@ -327,7 +325,7 @@ def test_verify_answer_grounding_node_keeps_supported_answer(monkeypatch):
     assert result["generated_answer"] == "Your deductible is $50."
 
 
-def test_verify_answer_grounding_node_refuses_unsupported_answer(monkeypatch):
+def test_verify_answer_grounding_node_records_unsupported_answer_for_routing(monkeypatch):
     fake_llm = FakeLLM(
         '{"status": "unsupported", "reason": "The evidence says $50, not $500.", '
         '"unsupported_claims": ["Your deductible is $500."]}'
@@ -356,10 +354,9 @@ def test_verify_answer_grounding_node_refuses_unsupported_answer(monkeypatch):
     result = verify_answer_grounding_node(state)
 
     assert result["grounding_status"] == "unsupported"
-    assert result["validation_status"] == "unsupported"
-    assert result["status"] == "refused"
-    assert result["citations"] == []
-    assert "could not find enough evidence" in result["final_answer"].lower()
+    assert result["status"] == "answered"
+    assert result["citations"] == [{"chunk_id": "chunk-1"}]
+    assert result["final_answer"] == "Your deductible is $500."
     assert result["unsupported_claims"] == ["Your deductible is $500."]
 
 
