@@ -10,6 +10,7 @@ class EvalCase(BaseModel):
     question: str
     expected_answer_contains: list[str] = Field(default_factory=list)
     expected_citation_document_contains: list[str] = Field(default_factory=list)
+    expected_document_ids: list[str] = Field(default_factory=list)
     expected_refusal: bool = False
 
 
@@ -41,20 +42,3 @@ class EvalRunResult(BaseModel):
     pass_rate: float
     results: list[EvalCaseResult] = Field(default_factory=list)
 
-
-class EvalRegressionResult(BaseModel):
-    """Comparison result between a baseline and current evaluation run."""
-    baseline_total: int
-    current_total: int
-    baseline_passed: int
-    current_passed: int
-    baseline_pass_rate: float
-    current_pass_rate: float
-    regressed_case_ids: list[str] = Field(default_factory=list)
-    improved_case_ids: list[str] = Field(default_factory=list)
-    unchanged_failed_case_ids: list[str] = Field(default_factory=list)
-    unchanged_passed_case_ids: list[str] = Field(default_factory=list)
-    new_case_ids: list[str] = Field(default_factory=list)
-    removed_case_ids: list[str] = Field(default_factory=list)
-    passed: bool
-    failure_reasons: list[str] = Field(default_factory=list)

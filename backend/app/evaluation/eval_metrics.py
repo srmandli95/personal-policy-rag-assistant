@@ -42,6 +42,22 @@ def citations_contain_expected_documents(
     )
 
 
+def citations_contain_expected_document_ids(
+    citations: list[dict],
+    expected_document_ids: list[str],
+) -> bool:
+    """Check citations against stable expected document identifiers."""
+    if not expected_document_ids:
+        return True
+
+    citation_document_ids = {
+        str(citation.get("document_id"))
+        for citation in citations
+        if citation.get("document_id")
+    }
+    return set(expected_document_ids).issubset(citation_document_ids)
+
+
 def is_refusal_response(answer_response: dict) -> bool:
     """Determine whether an answer is a refusal response."""
     status = str(answer_response.get("status") or "").casefold()
@@ -135,6 +151,10 @@ def evaluate_answer_response(
                 citations,
                 case.expected_citation_document_contains,
             ),
+            "expected_document_ids_cited": citations_contain_expected_document_ids(
+                citations,
+                case.expected_document_ids,
+            ),
             "evidence_present": evidence_chunk_count > 0,
             "citation_chunk_ids_valid": _citation_chunk_ids_are_valid(
                 answer_response
@@ -147,6 +167,9 @@ def evaluate_answer_response(
             "citations_present": "Supported answer did not include citations.",
             "expected_documents_cited": (
                 "Citations did not include all expected documents."
+            ),
+            "expected_document_ids_cited": (
+                "Citations did not include all expected document IDs."
             ),
             "evidence_present": "Supported answer did not include retrieved evidence.",
             "citation_chunk_ids_valid": (

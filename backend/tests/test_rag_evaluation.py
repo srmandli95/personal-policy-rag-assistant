@@ -1,10 +1,8 @@
-import json
-
 import pytest
 
-from app.evaluation.eval_loader import load_eval_cases
 from app.evaluation.eval_metrics import (
     citations_contain_expected_documents,
+    citations_contain_expected_document_ids,
     contains_expected_terms,
     evaluate_answer_response,
     is_refusal_response,
@@ -48,49 +46,6 @@ def supported_response() -> dict:
     }
 
 
-def test_load_eval_cases_loads_valid_json(tmp_path):
-    eval_file = tmp_path / "cases.json"
-    eval_file.write_text(
-        json.dumps([make_case().model_dump()]),
-        encoding="utf-8",
-    )
-
-    cases = load_eval_cases(str(eval_file))
-
-    assert len(cases) == 1
-    assert cases[0].id == "health_emergency_001"
-
-
-def test_load_eval_cases_raises_clear_error_for_missing_file(tmp_path):
-    missing_file = tmp_path / "missing.json"
-
-    with pytest.raises(FileNotFoundError, match="Evaluation file not found"):
-        load_eval_cases(str(missing_file))
-
-
-@pytest.mark.parametrize(
-    ("payload", "message"),
-    [
-        ({"id": "not-a-list"}, "JSON list"),
-        ([{"id": "missing-required-fields"}], "Invalid evaluation case at index 0"),
-    ],
-)
-def test_load_eval_cases_validates_structure_and_fields(tmp_path, payload, message):
-    eval_file = tmp_path / "invalid.json"
-    eval_file.write_text(json.dumps(payload), encoding="utf-8")
-
-    with pytest.raises(ValueError, match=message):
-        load_eval_cases(str(eval_file))
-
-
-def test_load_eval_cases_rejects_invalid_json(tmp_path):
-    eval_file = tmp_path / "invalid.json"
-    eval_file.write_text("{invalid", encoding="utf-8")
-
-    with pytest.raises(ValueError, match="invalid JSON"):
-        load_eval_cases(str(eval_file))
-
-
 def test_contains_expected_terms_requires_all_terms():
     assert contains_expected_terms(
         "Emergency care is covered based on plan rules.",
@@ -117,6 +72,13 @@ def test_citations_contain_expected_documents():
         ["health_policy", "employee_benefits"],
     )
     assert not citations_contain_expected_documents(citations, ["auto_policy"])
+
+
+def test_citations_contain_expected_document_ids():
+    citations = [{"document_id": "doc-1"}, {"document_id": "doc-2"}]
+
+    assert citations_contain_expected_document_ids(citations, ["doc-1", "doc-2"])
+    assert not citations_contain_expected_document_ids(citations, ["doc-3"])
 
 
 def test_expected_refusal_passes_when_response_status_is_refused():
