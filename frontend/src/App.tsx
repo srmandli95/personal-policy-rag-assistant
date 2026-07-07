@@ -2,15 +2,16 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "./api/client";
 import { ChatPanel } from "./components/ChatPanel";
 import { ChatHistoryPanel } from "./components/ChatHistoryPanel";
-import { DocumentPanel } from "./components/DocumentPanel";
 import { EvaluationWorkspace } from "./components/EvaluationWorkspace";
+import { KnowledgeBaseWorkspace } from "./components/KnowledgeBaseWorkspace";
 import type { ChatMessage, ChatSession, DocumentRecord } from "./types";
 
 const activeStatuses = new Set(["uploading", "validating", "extracting", "chunking", "embedding"]);
 const newChatKey = "__new_chat__";
-type WorkspaceView = "chat" | "evaluations";
+type WorkspaceView = "chat" | "knowledge-base" | "evaluations";
 
 export function workspaceViewFromHash(hash: string): WorkspaceView {
+  if (hash === "#knowledge-base") return "knowledge-base";
   return hash === "#evaluations" ? "evaluations" : "chat";
 }
 
@@ -24,7 +25,6 @@ export default function App() {
   const [activeSessionId, setActiveSessionId] = useState<string>();
   const [chatError, setChatError] = useState<string | null>(null);
   const [historyError, setHistoryError] = useState<string | null>(null);
-  const [documentsCollapsed, setDocumentsCollapsed] = useState(false);
   const [historyCollapsed, setHistoryCollapsed] = useState(false);
   const activeChatKey = activeSessionId ?? newChatKey;
   const messages = messagesByChat[activeChatKey] ?? [];
@@ -195,19 +195,11 @@ export default function App() {
     <div className="workspace-root">
       <nav className="workspace-tabs" aria-label="Workspace views">
         <button type="button" className={view === "chat" ? "active" : ""} onClick={() => navigateTo("chat")}>Chat</button>
+        <button type="button" className={view === "knowledge-base" ? "active" : ""} onClick={() => navigateTo("knowledge-base")}>Knowledge Base</button>
         <button type="button" className={view === "evaluations" ? "active" : ""} onClick={() => navigateTo("evaluations")}>Evaluations</button>
       </nav>
       {view === "chat" ? (
-      <div className={`app-shell ${documentsCollapsed ? "documents-collapsed" : ""} ${historyCollapsed ? "history-collapsed" : ""}`}>
-      <DocumentPanel
-        documents={documents}
-        loading={documentsLoading}
-        error={documentError}
-        collapsed={documentsCollapsed}
-        onToggleCollapsed={() => setDocumentsCollapsed((current) => !current)}
-        onUpload={upload}
-        onDelete={remove}
-      />
+      <div className={`app-shell ${historyCollapsed ? "history-collapsed" : ""}`}>
       <ChatHistoryPanel
         sessions={sessions}
         activeSessionId={activeSessionId}
@@ -226,6 +218,14 @@ export default function App() {
         onSend={send}
       />
       </div>
+      ) : view === "knowledge-base" ? (
+        <KnowledgeBaseWorkspace
+          documents={documents}
+          loading={documentsLoading}
+          error={documentError}
+          onUpload={upload}
+          onDelete={remove}
+        />
       ) : <EvaluationWorkspace documents={documents} />}
     </div>
   );
