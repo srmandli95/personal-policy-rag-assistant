@@ -9,9 +9,11 @@ from app.generation.citation_guard import (
 )
 from app.generation.llm_client import get_llm_client
 from app.generation.prompt_builder import (
+    build_answer_regeneration_prompt,
     build_answer_verification_prompt,
     build_answer_prompt,
     build_query_rewrite_prompt,
+    build_retrieval_retry_prompt,
     get_refusal_message,
     strip_generated_source_metadata,
 )
@@ -145,6 +147,39 @@ def rewrite_query_node(state: RAGState) -> RAGState:
     return state
 
 
+def refine_retrieval_query_node(state: RAGState) -> RAGState:
+    """Create an alternative query after an insufficient retrieval attempt."""
+    question = state.get("question") or ""
+    previous_query = state.get("rewritten_question") or question
+    next_attempt = state.get("retrieval_attempts", 0) + 1
+
+    try:
+        prompt = build_retrieval_retry_prompt(
+            question=question,
+            previous_query=previous_query,
+            attempt=next_attempt,
+        )
+        response = get_llm_client().generate(prompt)
+        refined_query = _extract_llm_text(response).strip()
+        state["rewritten_question"] = refined_query or question
+        logger.info(
+            "RAG retrieval retry query prepared: user_id=%s next_attempt=%s query_length=%s",
+            state.get("user_id"),
+            next_attempt,
+            len(state["rewritten_question"] or ""),
+        )
+    except Exception as exc:
+        state["rewritten_question"] = question
+        state["error"] = f"Retrieval retry query refinement failed: {exc}"
+        logger.warning(
+            "RAG retrieval retry query refinement failed; using original question: user_id=%s error=%s",
+            state.get("user_id"),
+            exc,
+        )
+
+    return state
+
+
 def retrieve_and_rerank_node(state: RAGState) -> RAGState:
     """Retrieve, combine, and rerank candidate evidence chunks."""
     db = state["db"]
@@ -165,6 +200,7 @@ def retrieve_and_rerank_node(state: RAGState) -> RAGState:
     vector_weight = state.get("vector_weight", 0.6)
     bm25_weight = state.get("bm25_weight", 0.4)
 
+    state["retrieval_attempts"] = state.get("retrieval_attempts", 0) + 1
     evidence_chunks = rerank_hybrid_results(
         db=db,
         user_id=user_id,
@@ -179,8 +215,9 @@ def retrieve_and_rerank_node(state: RAGState) -> RAGState:
 
     state["evidence_chunks"] = evidence_chunks[:top_k]
     logger.info(
-        "RAG node retrieve_and_rerank completed: user_id=%s retrieved=%s selected=%s",
+        "RAG node retrieve_and_rerank completed: user_id=%s attempt=%s retrieved=%s selected=%s",
         user_id,
+        state["retrieval_attempts"],
         len(evidence_chunks),
         len(state["evidence_chunks"]),
     )
@@ -212,16 +249,6 @@ def check_evidence_sufficiency_node(state: RAGState) -> RAGState:
     state["evidence_sufficient"] = evidence_sufficient
     state["evidence_sufficiency_reason"] = reason
 
-    if not evidence_sufficient:
-        refusal_message = get_refusal_message()
-
-        state["generated_answer"] = refusal_message
-        state["final_answer"] = refusal_message
-        state["citations"] = []
-        state["validation_status"] = "unsupported"
-        state["validation_reason"] = reason
-        state["status"] = "refused"
-
     return state
 
 
@@ -240,6 +267,9 @@ def generate_answer_node(state: RAGState) -> RAGState:
 
     question = state["question"]
     evidence_chunks = state.get("evidence_chunks", [])
+    previous_answer = state.get("generated_answer") or ""
+    generation_attempt = state.get("generation_attempts", 0) + 1
+    state["generation_attempts"] = generation_attempt
 
     citations = build_citations_from_evidence(evidence_chunks)
     logger.debug(
@@ -248,10 +278,18 @@ def generate_answer_node(state: RAGState) -> RAGState:
         len(evidence_chunks),
         len(citations),
     )
-    prompt = build_answer_prompt(
-        question=question,
-        evidence_chunks=evidence_chunks,
-    )
+    if generation_attempt > 1:
+        prompt = build_answer_regeneration_prompt(
+            question=question,
+            evidence_chunks=evidence_chunks,
+            previous_answer=previous_answer,
+            feedback=state.get("generation_feedback") or "The previous answer was not fully supported.",
+        )
+    else:
+        prompt = build_answer_prompt(
+            question=question,
+            evidence_chunks=evidence_chunks,
+        )
 
     llm_client = get_llm_client()
     generated_answer = strip_generated_source_metadata(
@@ -262,9 +300,15 @@ def generate_answer_node(state: RAGState) -> RAGState:
     state["final_answer"] = generated_answer
     state["citations"] = citations
     state["status"] = "answered"
+    state["grounding_status"] = None
+    state["grounding_reason"] = None
+    state["unsupported_claims"] = []
+    state["validation_status"] = None
+    state["validation_reason"] = None
     logger.info(
-        "RAG node generate_answer completed: user_id=%s answer_length=%s citations=%s",
+        "RAG node generate_answer completed: user_id=%s attempt=%s answer_length=%s citations=%s",
         state.get("user_id"),
+        generation_attempt,
         len(generated_answer),
         len(citations),
     )
@@ -311,21 +355,6 @@ def verify_answer_grounding_node(state: RAGState) -> RAGState:
         state["grounding_reason"],
     )
 
-    if verification_result["status"] != "supported":
-        refusal_message = get_refusal_message()
-        logger.warning(
-            "RAG answer refused after grounding verification: user_id=%s reason=%s",
-            state.get("user_id"),
-            state["grounding_reason"],
-        )
-
-        state["generated_answer"] = refusal_message
-        state["final_answer"] = refusal_message
-        state["citations"] = []
-        state["validation_status"] = "unsupported"
-        state["validation_reason"] = state["grounding_reason"]
-        state["status"] = "refused"
-
     return state
 
 
@@ -352,20 +381,82 @@ def validate_citations_node(state: RAGState) -> RAGState:
         state["validation_reason"],
     )
 
-    if validation_result["validation_status"] != "supported":
-        refusal_message = get_refusal_message()
-        logger.warning(
-            "RAG answer refused after citation validation: user_id=%s reason=%s",
-            state.get("user_id"),
-            state["validation_reason"],
-        )
-
-        state["generated_answer"] = refusal_message
-        state["final_answer"] = refusal_message
-        state["citations"] = []
-        state["status"] = "refused"
-
     return state
+
+
+def prepare_generation_retry_node(state: RAGState) -> RAGState:
+    """Preserve validation feedback before regenerating an answer."""
+    unsupported_claims = state.get("unsupported_claims") or []
+    feedback_parts = [
+        state.get("grounding_reason"),
+        state.get("validation_reason"),
+    ]
+    if unsupported_claims:
+        feedback_parts.append("Unsupported claims: " + "; ".join(unsupported_claims))
+
+    state["generation_feedback"] = " ".join(
+        str(part).strip()
+        for part in feedback_parts
+        if part and str(part).strip()
+    ) or "The previous answer was not fully supported by the evidence."
+    logger.info(
+        "RAG generation retry prepared: user_id=%s next_attempt=%s",
+        state.get("user_id"),
+        state.get("generation_attempts", 0) + 1,
+    )
+    return state
+
+
+def refuse_answer_node(state: RAGState) -> RAGState:
+    """Finalize a refusal after retry attempts are exhausted."""
+    refusal_message = get_refusal_message()
+    reason = (
+        state.get("validation_reason")
+        or state.get("grounding_reason")
+        or state.get("evidence_sufficiency_reason")
+        or "Retry attempts were exhausted without a supported answer."
+    )
+    state["generated_answer"] = refusal_message
+    state["final_answer"] = refusal_message
+    state["citations"] = []
+    state["validation_status"] = "unsupported"
+    state["validation_reason"] = reason
+    state["status"] = "refused"
+    logger.warning(
+        "RAG workflow refused after retries: user_id=%s retrieval_attempts=%s generation_attempts=%s reason=%s",
+        state.get("user_id"),
+        state.get("retrieval_attempts", 0),
+        state.get("generation_attempts", 0),
+        reason,
+    )
+    return state
+
+
+def route_after_evidence_check(state: RAGState) -> str:
+    """Route sufficient evidence to generation or retry/refuse weak retrieval."""
+    if state.get("evidence_sufficient"):
+        return "generate"
+    if state.get("retrieval_attempts", 0) < state.get("max_retrieval_attempts", 1):
+        return "retry"
+    return "refuse"
+
+
+def route_after_grounding_check(state: RAGState) -> str:
+    """Route grounded answers to citation validation or retry/refuse."""
+    if state.get("grounding_status") == "supported":
+        return "validate"
+    if state.get("generation_attempts", 0) < state.get("max_generation_attempts", 1):
+        return "retry"
+    return "refuse"
+
+
+def route_after_citation_check(state: RAGState) -> str:
+    """Return supported answers or retry/refuse invalid citations."""
+    if state.get("validation_status") == "supported":
+        return "final"
+    if state.get("generation_attempts", 0) < state.get("max_generation_attempts", 1):
+        return "retry"
+    return "refuse"
 
 
 def final_response_node(state: RAGState) -> RAGState:
@@ -392,6 +483,8 @@ def final_response_node(state: RAGState) -> RAGState:
         "evidence_sufficiency_reason": state.get("evidence_sufficiency_reason"),
         "model_name": state.get("model_name"),
         "status": state.get("status"),
+        "retrieval_attempts": state.get("retrieval_attempts", 0),
+        "generation_attempts": state.get("generation_attempts", 0),
     }
 
     state["final_answer"] = final_answer

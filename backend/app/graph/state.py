@@ -18,6 +18,11 @@ class RAGState(TypedDict, total=False):
     vector_weight: float
     bm25_weight: float
     min_reranker_score: float | None
+    retrieval_attempts: int
+    max_retrieval_attempts: int
+    generation_attempts: int
+    max_generation_attempts: int
+    generation_feedback: str | None
 
     user_context: dict[str, Any] | None
 

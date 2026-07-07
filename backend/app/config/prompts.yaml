@@ -31,6 +31,26 @@ contextual_query_rewrite_prompt: |
 
   Standalone retrieval query:
 
+retrieval_retry_prompt: |
+  You are improving a search query after document retrieval returned insufficient evidence.
+
+  Produce one alternative search query for the same user question.
+  Preserve the user's intent and do not answer the question.
+  Use different wording, likely document terminology, and important entities from the original question.
+  Do not add facts or assumptions.
+  Return only the revised search query.
+
+  Original question:
+  {question}
+
+  Previous unsuccessful query:
+  {previous_query}
+
+  Retrieval attempt:
+  {attempt}
+
+  Revised search query:
+
 answer_generation_prompt: |
   You are a careful document knowledge-base assistant.
 
@@ -55,6 +75,30 @@ answer_generation_prompt: |
   - Citations are displayed separately by the application.
 
   Answer:
+
+answer_regeneration_prompt: |
+  You are correcting an answer that failed grounding or citation validation.
+
+  Answer the user using only the supplied evidence.
+  Correct the problem described in the validation feedback.
+  Remove any claim that is not explicitly supported by the evidence.
+  If the evidence cannot support an answer, use the refusal message.
+
+  User question:
+  {question}
+
+  Previous answer:
+  {previous_answer}
+
+  Validation feedback:
+  {feedback}
+
+  Evidence:
+  {evidence_context}
+
+  Return only the corrected answer text. Do not include source labels, document names, chunk IDs, or citation metadata.
+
+  Corrected answer:
 
 answer_verification_prompt: |
   You are verifying whether an answer is fully supported by retrieved document evidence.

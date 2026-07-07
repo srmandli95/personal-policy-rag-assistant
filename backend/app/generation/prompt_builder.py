@@ -60,6 +60,20 @@ def build_query_rewrite_prompt(
     return template.format(question=question)
 
 
+def build_retrieval_retry_prompt(
+    question: str,
+    previous_query: str,
+    attempt: int,
+) -> str:
+    """Build a prompt for broadening an unsuccessful retrieval query."""
+    template = load_prompts()["retrieval_retry_prompt"]
+    return template.format(
+        question=question,
+        previous_query=previous_query,
+        attempt=attempt,
+    )
+
+
 def build_evidence_context(evidence_chunks: list[dict[str, Any]]) -> str:
     """Format retrieved chunks as evidence context."""
     if not evidence_chunks:
@@ -113,6 +127,22 @@ def build_answer_prompt(
     return template.format(
         question=question,
         evidence_context=evidence_context,
+    )
+
+
+def build_answer_regeneration_prompt(
+    question: str,
+    evidence_chunks: list[dict[str, Any]],
+    previous_answer: str,
+    feedback: str,
+) -> str:
+    """Build a grounded regeneration prompt using validation feedback."""
+    template = load_prompts()["answer_regeneration_prompt"]
+    return template.format(
+        question=question,
+        evidence_context=build_evidence_context(evidence_chunks),
+        previous_answer=previous_answer,
+        feedback=feedback,
     )
 
 

@@ -34,6 +34,8 @@ class Settings(BaseSettings):
     OPENAI_API_KEY: str | None = None
     OPENAI_MODEL_NAME: str = "gpt-4o-mini"
     ANSWER_TOP_K: int = 5
+    RAG_MAX_RETRIEVAL_ATTEMPTS: int = 2
+    RAG_MAX_GENERATION_ATTEMPTS: int = 2
 
     JWT_SECRET_KEY: str = "change_me_in_production"
     JWT_ALGORITHM: str = "HS256"
