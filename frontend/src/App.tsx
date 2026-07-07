@@ -3,12 +3,19 @@ import { api } from "./api/client";
 import { ChatPanel } from "./components/ChatPanel";
 import { ChatHistoryPanel } from "./components/ChatHistoryPanel";
 import { DocumentPanel } from "./components/DocumentPanel";
+import { EvaluationWorkspace } from "./components/EvaluationWorkspace";
 import type { ChatMessage, ChatSession, DocumentRecord } from "./types";
 
 const activeStatuses = new Set(["uploading", "validating", "extracting", "chunking", "embedding"]);
 const newChatKey = "__new_chat__";
+type WorkspaceView = "chat" | "evaluations";
+
+export function workspaceViewFromHash(hash: string): WorkspaceView {
+  return hash === "#evaluations" ? "evaluations" : "chat";
+}
 
 export default function App() {
+  const [view, setView] = useState<WorkspaceView>(() => workspaceViewFromHash(window.location.hash));
   const [documents, setDocuments] = useState<DocumentRecord[]>([]);
   const [documentError, setDocumentError] = useState<string | null>(null);
   const [documentsLoading, setDocumentsLoading] = useState(true);
@@ -46,6 +53,17 @@ export default function App() {
     void loadDocuments();
     void loadSessions();
   }, [loadDocuments, loadSessions]);
+
+  useEffect(() => {
+    const syncViewFromUrl = () => setView(workspaceViewFromHash(window.location.hash));
+    window.addEventListener("hashchange", syncViewFromUrl);
+    return () => window.removeEventListener("hashchange", syncViewFromUrl);
+  }, []);
+
+  const navigateTo = (nextView: WorkspaceView) => {
+    setView(nextView);
+    window.location.hash = nextView;
+  };
 
   const processing = documents.some((document) => activeStatuses.has(document.display_status));
   useEffect(() => {
@@ -174,7 +192,13 @@ export default function App() {
   };
 
   return (
-    <div className={`app-shell ${documentsCollapsed ? "documents-collapsed" : ""} ${historyCollapsed ? "history-collapsed" : ""}`}>
+    <div className="workspace-root">
+      <nav className="workspace-tabs" aria-label="Workspace views">
+        <button type="button" className={view === "chat" ? "active" : ""} onClick={() => navigateTo("chat")}>Chat</button>
+        <button type="button" className={view === "evaluations" ? "active" : ""} onClick={() => navigateTo("evaluations")}>Evaluations</button>
+      </nav>
+      {view === "chat" ? (
+      <div className={`app-shell ${documentsCollapsed ? "documents-collapsed" : ""} ${historyCollapsed ? "history-collapsed" : ""}`}>
       <DocumentPanel
         documents={documents}
         loading={documentsLoading}
@@ -201,6 +225,8 @@ export default function App() {
         error={chatError}
         onSend={send}
       />
+      </div>
+      ) : <EvaluationWorkspace documents={documents} />}
     </div>
   );
 }
