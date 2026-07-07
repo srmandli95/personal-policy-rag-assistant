@@ -8,10 +8,13 @@ from app.api.document_routes import router as document_router
 from app.api.chat_routes import router as chat_router
 from app.api.auth_routes import router as auth_router
 from app.api.retrieval_routes import router as retrieval_router
+from app.api.evaluation_routes import router as evaluation_router
 from app.models.chat_session import ChatSession
 from app.models.chat_message import ChatMessage
 from app.models.document_processing_job import DocumentProcessingJob
 from app.models.user import User
+from app.models.evaluation_dataset import EvaluationDataset
+from app.models.evaluation_run import EvaluationRun
 from app.config.settings import settings
 from app.db.database import Base, engine
 from app.db.schema_migrations import ensure_document_chunk_metadata_columns
@@ -49,6 +52,7 @@ app.include_router(health_router)
 app.include_router(document_router)
 app.include_router(chat_router)
 app.include_router(auth_router)
+app.include_router(evaluation_router)
 
 if settings.ENABLE_DEBUG_ENDPOINTS and settings.ENABLE_RETRIEVAL_DEBUG_ENDPOINTS:
     app.include_router(retrieval_router)
