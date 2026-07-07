@@ -5,6 +5,7 @@ import pytest
 from app.evaluation.eval_loader import load_eval_cases
 from app.evaluation.eval_metrics import (
     citations_contain_expected_documents,
+    citations_contain_expected_document_ids,
     contains_expected_terms,
     evaluate_answer_response,
     is_refusal_response,
@@ -117,6 +118,13 @@ def test_citations_contain_expected_documents():
         ["health_policy", "employee_benefits"],
     )
     assert not citations_contain_expected_documents(citations, ["auto_policy"])
+
+
+def test_citations_contain_expected_document_ids():
+    citations = [{"document_id": "doc-1"}, {"document_id": "doc-2"}]
+
+    assert citations_contain_expected_document_ids(citations, ["doc-1", "doc-2"])
+    assert not citations_contain_expected_document_ids(citations, ["doc-3"])
 
 
 def test_expected_refusal_passes_when_response_status_is_refused():
