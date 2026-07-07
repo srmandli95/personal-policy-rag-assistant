@@ -10,6 +10,7 @@ class EvalCase(BaseModel):
     question: str
     expected_answer_contains: list[str] = Field(default_factory=list)
     expected_citation_document_contains: list[str] = Field(default_factory=list)
+    expected_document_ids: list[str] = Field(default_factory=list)
     expected_refusal: bool = False
 
 
