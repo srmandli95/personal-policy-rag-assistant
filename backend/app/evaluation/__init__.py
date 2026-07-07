@@ -1,10 +1,8 @@
-"""Deterministic local evaluation helpers for the RAG workflow."""
+"""Evaluation helpers used by the persisted RAG evaluation workflow."""
 
-from app.evaluation.eval_loader import load_eval_cases
 from app.evaluation.eval_models import (
     EvalCase,
     EvalCaseResult,
-    EvalRegressionResult,
     EvalRunResult,
 )
 from app.evaluation.eval_runner import run_rag_evaluation
@@ -12,8 +10,6 @@ from app.evaluation.eval_runner import run_rag_evaluation
 __all__ = [
     "EvalCase",
     "EvalCaseResult",
-    "EvalRegressionResult",
     "EvalRunResult",
-    "load_eval_cases",
     "run_rag_evaluation",
 ]

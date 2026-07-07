@@ -13,7 +13,6 @@ RUN pip install --no-cache-dir pipenv \
     && pipenv install --system --dev --skip-lock
 
 COPY backend/app /app/app
-COPY backend/eval /app/eval
 COPY backend/scripts /app/scripts
 COPY backend/tests /app/tests
 COPY backend/sample_knowledge_base /app/sample_knowledge_base
