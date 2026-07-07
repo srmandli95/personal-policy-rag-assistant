@@ -1,4 +1,12 @@
-import type { AuthUser, ChatMessage, ChatSession, Citation, DocumentRecord } from "../types";
+import type {
+  AuthUser,
+  ChatMessage,
+  ChatSession,
+  Citation,
+  DocumentRecord,
+  EvaluationDataset,
+  EvaluationRun,
+} from "../types";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "/api";
 
@@ -80,5 +88,35 @@ export const api = {
       body: JSON.stringify({ question, session_id: sessionId }),
     });
     return data;
+  },
+
+  async listEvaluationDatasets(): Promise<EvaluationDataset[]> {
+    const data = await request<{ datasets: EvaluationDataset[] }>("/evaluations/datasets");
+    return data.datasets;
+  },
+
+  async uploadEvaluationDataset(file: File, name?: string): Promise<EvaluationDataset> {
+    const body = new FormData();
+    body.append("file", file);
+    if (name?.trim()) body.append("name", name.trim());
+    return request<EvaluationDataset>("/evaluations/datasets", { method: "POST", body });
+  },
+
+  async deleteEvaluationDataset(datasetId: string): Promise<void> {
+    await request(`/evaluations/datasets/${datasetId}`, { method: "DELETE" });
+  },
+
+  async runEvaluationDataset(datasetId: string): Promise<EvaluationRun> {
+    return request<EvaluationRun>(`/evaluations/datasets/${datasetId}/runs`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+  },
+
+  async listEvaluationRuns(datasetId?: string): Promise<EvaluationRun[]> {
+    const query = datasetId ? `?dataset_id=${encodeURIComponent(datasetId)}` : "";
+    const data = await request<{ runs: EvaluationRun[] }>(`/evaluations/runs${query}`);
+    return data.runs;
   },
 };
