@@ -26,6 +26,12 @@ async def lifespan(_: FastAPI):
     """Create database tables during application startup."""
     Base.metadata.create_all(bind=engine)
     ensure_document_chunk_metadata_columns(engine)
+    if settings.PRELOAD_LOCAL_MODELS:
+        from app.embeddings.embedding_service import get_embedding_service
+        from app.reranking.reranking_service import get_reranker
+
+        get_embedding_service()
+        get_reranker()
     yield
 
 
