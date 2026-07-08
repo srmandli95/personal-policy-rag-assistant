@@ -1,4 +1,5 @@
 from typing import Any
+import asyncio
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -7,7 +8,8 @@ from starlette.concurrency import run_in_threadpool
 from app.auth.dependencies import get_current_user
 from app.config.settings import settings
 from app.db.database import SessionLocal, get_async_db
-from app.graph.rag_graph import run_rag_workflow
+from app.graph.rag_graph import run_rag_workflow, run_rag_workflow_async
+from app.generation.llm_client import LLMRateLimitError
 from app.models.user import User
 from app.retrieval.retrieval_settings import (
     RetrievalSettings,
@@ -31,6 +33,7 @@ router = APIRouter(prefix="/chat", tags=["Chat"])
 debug_router = APIRouter(tags=["Chat Debug"])
 logger = get_logger(__name__)
 CHAT_HISTORY_TURN_LIMIT = 6
+rag_request_slots = asyncio.Semaphore(max(1, settings.API_MAX_CONCURRENT_RAG_REQUESTS))
 
 
 def _run_rag_workflow_with_session(**kwargs: Any) -> dict[str, Any]:
@@ -135,6 +138,13 @@ async def ask_question(
             ),
             require_final_top_k_within_rerank=True,
         )
+    except LLMRateLimitError as exc:
+        logger.warning("LLM provider capacity exhausted: user_id=%s", user_id)
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="The answer service is temporarily busy. Please retry shortly.",
+            headers={"Retry-After": "5"},
+        ) from exc
     except ValueError as exc:
         logger.warning(
             "Chat ask rejected by retrieval settings: user_id=%s error=%s",
@@ -181,20 +191,41 @@ async def ask_question(
         )
 
     try:
-        result = await run_in_threadpool(
-            _run_rag_workflow_with_session,
-            user_id=str(current_user.id),
-            question=question,
-            chat_history=chat_history,
-            top_k=retrieval_settings.top_k,
-            hybrid_top_k=retrieval_settings.hybrid_top_k,
-            vector_top_k=retrieval_settings.vector_top_k,
-            bm25_top_k=retrieval_settings.bm25_top_k,
-            rerank_top_k=retrieval_settings.rerank_top_k,
-            vector_weight=retrieval_settings.vector_weight,
-            bm25_weight=retrieval_settings.bm25_weight,
-            min_reranker_score=retrieval_settings.min_reranker_score,
-        )
+        async with rag_request_slots:
+            if settings.ASYNC_RAG_WORKFLOW:
+                sync_db = SessionLocal()
+                try:
+                    result = await run_rag_workflow_async(
+                        db=sync_db,
+                        user_id=str(current_user.id),
+                        question=question,
+                        chat_history=chat_history,
+                        top_k=retrieval_settings.top_k,
+                        hybrid_top_k=retrieval_settings.hybrid_top_k,
+                        vector_top_k=retrieval_settings.vector_top_k,
+                        bm25_top_k=retrieval_settings.bm25_top_k,
+                        rerank_top_k=retrieval_settings.rerank_top_k,
+                        vector_weight=retrieval_settings.vector_weight,
+                        bm25_weight=retrieval_settings.bm25_weight,
+                        min_reranker_score=retrieval_settings.min_reranker_score,
+                    )
+                finally:
+                    sync_db.close()
+            else:
+                result = await run_in_threadpool(
+                    _run_rag_workflow_with_session,
+                    user_id=str(current_user.id),
+                    question=question,
+                    chat_history=chat_history,
+                    top_k=retrieval_settings.top_k,
+                    hybrid_top_k=retrieval_settings.hybrid_top_k,
+                    vector_top_k=retrieval_settings.vector_top_k,
+                    bm25_top_k=retrieval_settings.bm25_top_k,
+                    rerank_top_k=retrieval_settings.rerank_top_k,
+                    vector_weight=retrieval_settings.vector_weight,
+                    bm25_weight=retrieval_settings.bm25_weight,
+                    min_reranker_score=retrieval_settings.min_reranker_score,
+                )
     except ValueError as exc:
         logger.warning("RAG workflow rejected chat ask: user_id=%s error=%s", user_id, exc)
         raise HTTPException(
