@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api/client";
 import type { DocumentRecord, EvaluationDataset, EvaluationRun } from "../types";
 
@@ -34,6 +34,19 @@ function makeTemplate(documentId: string): string {
   }, null, 2);
 }
 
+const activeRunStatuses = new Set(["pending", "running"]);
+
+function mergeRuns(current: EvaluationRun[], incoming: EvaluationRun[]): EvaluationRun[] {
+  const byId = new Map(current.map((run) => [run.run_id, run]));
+  for (const run of incoming) {
+    byId.set(run.run_id, run);
+  }
+  return Array.from(byId.values()).sort((left, right) => (
+    new Date(right.started_at || right.completed_at || 0).getTime()
+    - new Date(left.started_at || left.completed_at || 0).getTime()
+  ));
+}
+
 export function EvaluationWorkspace({ documents }: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
   const copyFeedbackTimer = useRef<number | undefined>(undefined);
@@ -57,7 +70,7 @@ export function EvaluationWorkspace({ documents }: Props) {
   const datasetRuns = runs.filter((run) => run.dataset_id === selectedDatasetId);
   const selectedRun = runs.find((run) => run.run_id === selectedRunId) || datasetRuns[0];
 
-  const refresh = async () => {
+  const refresh = useCallback(async () => {
     try {
       const [nextDatasets, nextRuns] = await Promise.all([
         api.listEvaluationDatasets(),
@@ -72,12 +85,29 @@ export function EvaluationWorkspace({ documents }: Props) {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
+
+  const refreshRuns = useCallback(async () => {
+    try {
+      const nextRuns = await api.listEvaluationRuns();
+      setRuns((current) => mergeRuns(current, nextRuns));
+      setError(undefined);
+    } catch (loadError) {
+      setError(loadError instanceof Error ? loadError.message : "Could not load evaluation runs");
+    }
+  }, []);
 
   useEffect(() => {
     void refresh();
     return () => window.clearTimeout(copyFeedbackTimer.current);
-  }, []);
+  }, [refresh]);
+
+  const hasActiveRun = runs.some((runResult) => activeRunStatuses.has(runResult.status));
+  useEffect(() => {
+    if (!hasActiveRun) return;
+    const interval = window.setInterval(() => void refreshRuns(), 2000);
+    return () => window.clearInterval(interval);
+  }, [hasActiveRun, refreshRuns]);
 
   const copyDocumentId = async (documentId: string) => {
     try {
@@ -115,7 +145,7 @@ export function EvaluationWorkspace({ documents }: Props) {
     setError(undefined);
     try {
       const result = await api.runEvaluationDataset(selectedDatasetId);
-      setRuns((current) => [result, ...current]);
+      setRuns((current) => mergeRuns(current, [result]));
       setSelectedRunId(result.run_id);
     } catch (runError) {
       setError(runError instanceof Error ? runError.message : "Evaluation run failed");
@@ -235,7 +265,7 @@ export function EvaluationWorkspace({ documents }: Props) {
             <div><h3>Run results</h3><p className="muted">{selectedDataset ? `${datasetRuns.length} runs for this dataset` : "Select a dataset"}</p></div>
             {datasetRuns.length > 0 && (
               <select aria-label="Evaluation run" value={selectedRun?.run_id || ""} onChange={(event) => setSelectedRunId(event.target.value)}>
-                {datasetRuns.map((runResult) => <option value={runResult.run_id} key={runResult.run_id}>{dateTime(runResult.started_at)} · {runResult.pass_rate.toFixed(0)}%</option>)}
+                {datasetRuns.map((runResult) => <option value={runResult.run_id} key={runResult.run_id}>{dateTime(runResult.started_at)} · {runResult.status} · {runResult.pass_rate.toFixed(0)}%</option>)}
               </select>
             )}
           </div>
@@ -243,6 +273,12 @@ export function EvaluationWorkspace({ documents }: Props) {
           {!selectedRun && <p className="muted eval-empty-results">Run the selected dataset to see case-level results.</p>}
           {selectedRun && (
             <>
+              {activeRunStatuses.has(selectedRun.status) && (
+                <p className="muted eval-empty-results">Evaluation {selectedRun.status}...</p>
+              )}
+              {selectedRun.status === "failed" && selectedRun.error_message && (
+                <div className="error-banner" role="alert">{selectedRun.error_message}</div>
+              )}
               <div className="eval-summary-strip">
                 <div><span>Pass rate</span><strong>{selectedRun.pass_rate.toFixed(1)}%</strong></div>
                 <div><span>Passed</span><strong>{selectedRun.passed}</strong></div>
