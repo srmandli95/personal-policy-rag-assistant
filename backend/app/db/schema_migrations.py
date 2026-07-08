@@ -38,19 +38,31 @@ def ensure_document_chunk_metadata_columns(engine: Engine) -> None:
         if name not in existing_columns
     }
 
-    if not missing_columns:
-        return
-
-    logger.info(
-        "Applying document chunk metadata schema update: columns=%s",
-        sorted(missing_columns),
-    )
-
     with engine.begin() as connection:
+        # Multiple Uvicorn workers execute lifespan concurrently. Serialize the
+        # additive migration so PostgreSQL does not race while creating the same
+        # catalog object despite CREATE INDEX IF NOT EXISTS.
+        if engine.dialect.name == "postgresql":
+            connection.execute(
+                text("SELECT pg_advisory_xact_lock(724194031)")
+            )
+        if missing_columns:
+            logger.info(
+                "Applying document chunk metadata schema update: columns=%s",
+                sorted(missing_columns),
+            )
         for column_name, column_type in missing_columns.items():
             connection.execute(
                 text(
                     f"ALTER TABLE document_chunks "
                     f"ADD COLUMN {column_name} {column_type}"
+                )
+            )
+        if engine.dialect.name == "postgresql":
+            connection.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS ix_document_chunks_search_fts "
+                    "ON document_chunks USING GIN "
+                    "(to_tsvector('english', coalesce(search_text, chunk_text)))"
                 )
             )
