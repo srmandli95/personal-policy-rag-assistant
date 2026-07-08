@@ -12,6 +12,7 @@ from app.models.document_processing_job import DocumentProcessingJob
 from app.models.evaluation_dataset import EvaluationDataset
 from app.models.evaluation_run import EvaluationRun
 from app.repositories.document_repository import get_document_by_id
+from app.repositories.document_processing_job_repository import mark_job_failed
 from app.repositories.evaluation_repository import complete_evaluation_run, fail_evaluation_run
 from app.utils.logger import get_logger
 
@@ -64,14 +65,22 @@ def run_one_job() -> bool:
     try:
         job = _claim_document_job(db)
         if job:
-            document = get_document_by_id(db, job.document_id, job.user_id)
-            if document is None:
-                job.status = "failed"
-                job.error_message = "Document no longer exists"
-                job.completed_at = datetime.utcnow()
-                db.commit()
-            else:
-                process_document(db, document, force=job.force, job=job)
+            try:
+                document = get_document_by_id(
+                    db=db,
+                    document_id=str(job.document_id),
+                    user_id=str(job.user_id),
+                )
+                if document is None:
+                    job.status = "failed"
+                    job.error_message = "Document no longer exists"
+                    job.completed_at = datetime.utcnow()
+                    db.commit()
+                else:
+                    process_document(db, document, force=job.force, job=job)
+            except Exception as exc:
+                logger.exception("Document worker failed: job_id=%s document_id=%s", job.id, job.document_id)
+                mark_job_failed(db, job, job.steps or [], str(exc))
             return True
 
         run = _claim_evaluation_run(db)
