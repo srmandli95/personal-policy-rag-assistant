@@ -16,6 +16,9 @@ class Base(DeclarativeBase):
 engine = create_engine(
     settings.DATABASE_URL,
     pool_pre_ping=True,
+    pool_size=settings.DATABASE_POOL_SIZE,
+    max_overflow=settings.DATABASE_MAX_OVERFLOW,
+    pool_timeout=settings.DATABASE_POOL_TIMEOUT_SECONDS,
 )
 
 SessionLocal = sessionmaker(
@@ -30,6 +33,9 @@ async_engine = create_async_engine(
     settings.ASYNC_DATABASE_URL,
     future=True,
     pool_pre_ping=True,
+    pool_size=settings.DATABASE_POOL_SIZE,
+    max_overflow=settings.DATABASE_MAX_OVERFLOW,
+    pool_timeout=settings.DATABASE_POOL_TIMEOUT_SECONDS,
 )
 
 AsyncSessionLocal = async_sessionmaker(

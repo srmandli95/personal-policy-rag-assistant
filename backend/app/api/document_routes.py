@@ -13,6 +13,7 @@ from fastapi import (
     status,
 )
 from sqlalchemy.orm import Session
+from starlette.concurrency import run_in_threadpool
 
 from app.auth.dependencies import get_current_user
 from app.config.settings import settings
@@ -143,9 +144,15 @@ def _validate_file(file: UploadFile) -> None:
 
 
 async def _get_file_size_bytes(file: UploadFile) -> int:
-    """Measure an upload without consuming the stream for later storage."""
-    contents = await file.read()
-    file_size_bytes = len(contents)
+    """Measure the spooled upload without copying its contents into memory."""
+    def measure() -> int:
+        current = file.file.tell()
+        file.file.seek(0, 2)
+        size = file.file.tell()
+        file.file.seek(current)
+        return size
+
+    file_size_bytes = await run_in_threadpool(measure)
 
     max_upload_size_bytes = settings.MAX_UPLOAD_SIZE_MB * 1024 * 1024
 
@@ -323,29 +330,34 @@ async def upload_document(
     clean_category = _validate_category(category)
 
     _validate_file(file)
-
     file_size_bytes = await _get_file_size_bytes(file)
-    logger.info(
-        "Document upload accepted: user_id=%s file_name=%s content_type=%s size_bytes=%s",
-        authenticated_user_id,
-        file.filename,
-        file.content_type,
-        file_size_bytes,
-    )
 
     storage_service = LocalStorageService()
 
     storage_document_id = str(uuid4())
 
-    storage_metadata = storage_service.save_file(
-        file_obj=file.file,
-        user_id=authenticated_user_id,
-        document_id=storage_document_id,
-        original_file_name=file.filename,
+    # UploadFile is already spooled by Starlette. Copy it in a worker thread in
+    # fixed-size chunks so large files neither occupy the event loop nor get
+    # materialized as a second in-memory byte string.
+    storage_metadata = await run_in_threadpool(
+        storage_service.save_file,
+        file.file,
+        authenticated_user_id,
+        storage_document_id,
+        file.filename,
     )
+    file_size_bytes = int(storage_metadata.get("file_size_bytes", file_size_bytes))
+    max_upload_size_bytes = settings.MAX_UPLOAD_SIZE_MB * 1024 * 1024
+    if file_size_bytes > max_upload_size_bytes:
+        await run_in_threadpool(storage_service.delete_file, storage_metadata["storage_path"])
+        raise HTTPException(
+            status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+            detail=f"File size exceeds {settings.MAX_UPLOAD_SIZE_MB} MB limit",
+        )
 
     try:
-        document = create_document_record(
+        document = await run_in_threadpool(
+            create_document_record,
             db=db,
             user_id=authenticated_user_id,
             original_file_name=file.filename,
@@ -367,7 +379,8 @@ async def upload_document(
         raise
 
     try:
-        job = create_processing_job(
+        job = await run_in_threadpool(
+            create_processing_job,
             db=db,
             document_id=str(document.id),
             user_id=authenticated_user_id,
@@ -384,12 +397,13 @@ async def upload_document(
             user_id=authenticated_user_id,
         )
         raise
-    background_tasks.add_task(
-        _process_document_in_background,
-        str(document.id),
-        authenticated_user_id,
-        str(job.id),
-    )
+    if settings.JOB_EXECUTION_MODE == "inline":
+        background_tasks.add_task(
+            _process_document_in_background,
+            str(document.id),
+            authenticated_user_id,
+            str(job.id),
+        )
     logger.info(
         "Document upload completed and processing queued: document_id=%s user_id=%s job_id=%s",
         document.id,

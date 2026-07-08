@@ -5,6 +5,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
 from pydantic import ValidationError
 from sqlalchemy.orm import Session
+from starlette.concurrency import run_in_threadpool
 
 from app.auth.dependencies import get_current_user
 from app.db.database import get_db
@@ -25,6 +26,7 @@ from app.repositories.evaluation_repository import (
     list_evaluation_datasets,
     list_evaluation_runs,
 )
+from app.config.settings import settings as app_settings
 from app.schemas.evaluation_schema import (
     EvaluationDatasetDetail,
     EvaluationDatasetListResponse,
@@ -186,9 +188,10 @@ async def upload_evaluation_dataset(
 
     clean_name, raw_cases = _parse_eval_payload(payload, name)
     user_id = str(current_user.id)
-    cases = _validate_cases(db, user_id, raw_cases)
+    cases = await run_in_threadpool(_validate_cases, db, user_id, raw_cases)
     document_ids = sorted({document_id for case in cases for document_id in case.expected_document_ids})
-    dataset = create_evaluation_dataset(
+    dataset = await run_in_threadpool(
+        create_evaluation_dataset,
         db,
         user_id=user_id,
         name=clean_name,
@@ -237,7 +240,16 @@ def run_evaluation_dataset(
     user_id = str(current_user.id)
     dataset = _owned_dataset_or_404(db, dataset_id, user_id)
     settings = request.model_dump()
-    run = create_evaluation_run(db, dataset_id=dataset_id, user_id=user_id, settings=settings)
+    run = create_evaluation_run(
+        db,
+        dataset_id=dataset_id,
+        user_id=user_id,
+        settings=settings,
+        status="running" if app_settings.JOB_EXECUTION_MODE == "inline" else "pending",
+    )
+
+    if app_settings.JOB_EXECUTION_MODE != "inline":
+        return _run_response(run)
 
     try:
         result = run_rag_evaluation(
@@ -277,4 +289,3 @@ def get_evaluation_run_detail(
     if run is None:
         raise HTTPException(status_code=404, detail="Evaluation run not found")
     return _run_response(run)
-

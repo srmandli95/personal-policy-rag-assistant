@@ -2,6 +2,7 @@ import re
 from typing import Any
 
 from rank_bm25 import BM25Okapi
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.models.document import Document
@@ -59,6 +60,54 @@ def bm25_search(
 
     clean_user_id = user_id.strip()
     clean_query = query.strip()
+
+    # PostgreSQL maintains and searches its lexical representation inside the
+    # database. This avoids fetching and rebuilding the user's whole BM25
+    # corpus for every production query. SQLite retains the Python fallback so
+    # unit tests and lightweight local development remain portable.
+    if db.bind is not None and db.bind.dialect.name == "postgresql":
+        document = func.to_tsvector(
+            "english",
+            func.coalesce(DocumentChunk.search_text, DocumentChunk.chunk_text),
+        )
+        query_vector = func.websearch_to_tsquery("english", clean_query)
+        rank = func.ts_rank_cd(document, query_vector).label("bm25_score")
+        rows = (
+            db.query(
+                DocumentChunk,
+                Document.original_file_name.label("document_name"),
+                Document.category.label("category"),
+                rank,
+            )
+            .join(Document, DocumentChunk.document_id == Document.id)
+            .filter(DocumentChunk.user_id == clean_user_id)
+            .filter(DocumentChunk.status.in_(["created", "embedded"]))
+            .filter(Document.status == "embedded")
+            .filter(document.op("@@")(query_vector))
+            .order_by(rank.desc())
+            .limit(top_k)
+            .all()
+        )
+        return [
+            {
+                "chunk_id": str(row.DocumentChunk.id),
+                "document_id": str(row.DocumentChunk.document_id),
+                "user_id": row.DocumentChunk.user_id,
+                "chunk_text": row.DocumentChunk.chunk_text,
+                "chunk_index": row.DocumentChunk.chunk_index,
+                "token_count": row.DocumentChunk.token_count,
+                "page_number": row.DocumentChunk.page_number,
+                "section_title": row.DocumentChunk.section_title,
+                "summary": row.DocumentChunk.summary,
+                "keywords": row.DocumentChunk.keywords or [],
+                "hypothetical_questions": row.DocumentChunk.hypothetical_questions or [],
+                "structure_types": row.DocumentChunk.structure_types or [],
+                "document_name": row.document_name,
+                "category": row.category,
+                "bm25_score": float(row.bm25_score),
+            }
+            for row in rows
+        ]
 
     rows = (
         db.query(

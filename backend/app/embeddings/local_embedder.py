@@ -1,11 +1,14 @@
 from typing import List
+from threading import BoundedSemaphore
 
 from sentence_transformers import SentenceTransformer
 
 from app.utils.logger import get_logger
+from app.config.settings import settings
 
 
 logger = get_logger(__name__)
+_inference_slots = BoundedSemaphore(max(1, settings.INFERENCE_MAX_CONCURRENCY))
 
 
 class LocalEmbeddingService:
@@ -27,10 +30,11 @@ class LocalEmbeddingService:
             len(safe_text),
         )
 
-        embedding = self.model.encode(
-            safe_text,
-            normalize_embeddings=True,
-        )
+        with _inference_slots:
+            embedding = self.model.encode(
+                safe_text,
+                normalize_embeddings=True,
+            )
 
         return embedding.astype(float).tolist()
 
@@ -42,10 +46,11 @@ class LocalEmbeddingService:
         ]
         logger.debug("Embedding text batch: model_name=%s count=%s", self.model_name, len(safe_texts))
 
-        embeddings = self.model.encode(
-            safe_texts,
-            normalize_embeddings=True,
-        )
+        with _inference_slots:
+            embeddings = self.model.encode(
+                safe_texts,
+                normalize_embeddings=True,
+            )
 
         return [
             embedding.astype(float).tolist()

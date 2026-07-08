@@ -1,4 +1,5 @@
 from typing import Any
+from functools import lru_cache
 
 from app.config.settings import settings
 from app.reranking.cross_encoder_reranker import CrossEncoderReranker
@@ -7,6 +8,12 @@ from app.retrieval.retrieval_settings import (
     RetrievalSettings,
     validate_retrieval_settings,
 )
+
+
+@lru_cache(maxsize=1)
+def get_reranker() -> CrossEncoderReranker:
+    """Return the process-wide reranker instead of loading it per query."""
+    return CrossEncoderReranker(model_name=settings.RERANKER_MODEL_NAME)
 
 
 def rerank_hybrid_results(
@@ -58,9 +65,7 @@ def rerank_hybrid_results(
     if not candidates:
         return []
 
-    reranker = CrossEncoderReranker(
-        model_name=settings.RERANKER_MODEL_NAME,
-    )
+    reranker = get_reranker()
 
     return reranker.rerank(
         query=query,

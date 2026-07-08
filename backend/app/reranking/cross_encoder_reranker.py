@@ -1,7 +1,12 @@
 from copy import deepcopy
 from typing import Any
+from threading import BoundedSemaphore
 
 from sentence_transformers import CrossEncoder
+from app.config.settings import settings
+
+
+_inference_slots = BoundedSemaphore(max(1, settings.INFERENCE_MAX_CONCURRENCY))
 
 
 class CrossEncoderReranker:
@@ -45,7 +50,8 @@ class CrossEncoderReranker:
             for candidate in candidates
         ]
 
-        scores = self.model.predict(pairs)
+        with _inference_slots:
+            scores = self.model.predict(pairs)
 
         reranked_results: list[dict[str, Any]] = []
 

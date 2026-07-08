@@ -69,11 +69,12 @@ def create_evaluation_run(
     dataset_id: str,
     user_id: str,
     settings: dict[str, Any],
+    status: str = "running",
 ) -> EvaluationRun:
     run = EvaluationRun(
         dataset_id=dataset_id,
         user_id=user_id,
-        status="running",
+        status=status,
         settings=settings,
     )
     db.add(run)
@@ -129,4 +130,3 @@ def get_evaluation_run(
         .filter(EvaluationRun.id == run_id, EvaluationRun.user_id == user_id)
         .first()
     )
-
