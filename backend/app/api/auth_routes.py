@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Response, status
 from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
+from starlette.concurrency import run_in_threadpool
 
 from app.auth.dependencies import get_current_user
 from app.auth.jwt_handler import create_access_token
@@ -206,7 +207,8 @@ async def google_callback(
             _mask_email(str(identity["email"])),
             identity["provider_user_id"],
         )
-        user = get_or_create_oauth_user(
+        user = await run_in_threadpool(
+            get_or_create_oauth_user,
             db=db,
             provider="google",
             provider_user_id=str(identity["provider_user_id"]),
