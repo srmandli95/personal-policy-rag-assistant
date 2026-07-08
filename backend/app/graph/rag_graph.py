@@ -1,4 +1,5 @@
 from typing import Any
+from functools import lru_cache
 
 from langgraph.graph import END, START, StateGraph
 
@@ -15,6 +16,10 @@ from app.graph.nodes import (
     route_after_evidence_check,
     route_after_grounding_check,
     rewrite_query_node,
+    rewrite_query_node_async,
+    refine_retrieval_query_node_async,
+    generate_answer_node_async,
+    verify_answer_grounding_node_async,
     validate_citations_node,
     verify_answer_grounding_node,
 )
@@ -90,6 +95,42 @@ def build_rag_graph():
     graph_builder.add_edge("refuse_answer", "final_response")
     graph_builder.add_edge("final_response", END)
 
+    return graph_builder.compile()
+
+
+@lru_cache(maxsize=1)
+def build_async_rag_graph():
+    """Compile a graph whose LLM nodes use non-blocking provider I/O."""
+    graph_builder = StateGraph(RAGState)
+    graph_builder.add_node("load_user_context", load_user_context_node)
+    graph_builder.add_node("rewrite_query", rewrite_query_node_async)
+    graph_builder.add_node("retrieve_and_rerank", retrieve_and_rerank_node)
+    graph_builder.add_node("check_evidence_sufficiency", check_evidence_sufficiency_node)
+    graph_builder.add_node("refine_retrieval_query", refine_retrieval_query_node_async)
+    graph_builder.add_node("generate_answer", generate_answer_node_async)
+    graph_builder.add_node("verify_answer_grounding", verify_answer_grounding_node_async)
+    graph_builder.add_node("validate_citations", validate_citations_node)
+    graph_builder.add_node("prepare_generation_retry", prepare_generation_retry_node)
+    graph_builder.add_node("refuse_answer", refuse_answer_node)
+    graph_builder.add_node("final_response", final_response_node)
+    graph_builder.add_edge(START, "load_user_context")
+    graph_builder.add_edge("load_user_context", "rewrite_query")
+    graph_builder.add_edge("rewrite_query", "retrieve_and_rerank")
+    graph_builder.add_edge("retrieve_and_rerank", "check_evidence_sufficiency")
+    graph_builder.add_conditional_edges("check_evidence_sufficiency", route_after_evidence_check, {
+        "generate": "generate_answer", "retry": "refine_retrieval_query", "refuse": "refuse_answer",
+    })
+    graph_builder.add_edge("refine_retrieval_query", "retrieve_and_rerank")
+    graph_builder.add_edge("generate_answer", "verify_answer_grounding")
+    graph_builder.add_conditional_edges("verify_answer_grounding", route_after_grounding_check, {
+        "validate": "validate_citations", "retry": "prepare_generation_retry", "refuse": "refuse_answer",
+    })
+    graph_builder.add_conditional_edges("validate_citations", route_after_citation_check, {
+        "final": "final_response", "retry": "prepare_generation_retry", "refuse": "refuse_answer",
+    })
+    graph_builder.add_edge("prepare_generation_retry", "generate_answer")
+    graph_builder.add_edge("refuse_answer", "final_response")
+    graph_builder.add_edge("final_response", END)
     return graph_builder.compile()
 
 
@@ -192,3 +233,64 @@ def run_rag_workflow(
         final_response.get("validation_status"),
     )
     return final_response
+
+
+async def run_rag_workflow_async(db: Any, **kwargs: Any) -> dict[str, Any]:
+    """Run the graph with async LLM nodes while retaining bounded sync inference nodes."""
+    user_id = kwargs["user_id"]
+    question = kwargs["question"]
+    retrieval_settings = validate_retrieval_settings(
+        RetrievalSettings(
+            top_k=kwargs.get("top_k", 5),
+            hybrid_top_k=kwargs.get("hybrid_top_k", 20),
+            vector_top_k=kwargs.get("vector_top_k", 20),
+            bm25_top_k=kwargs.get("bm25_top_k", 20),
+            rerank_top_k=kwargs.get("rerank_top_k", 8),
+            vector_weight=kwargs.get("vector_weight", 0.6),
+            bm25_weight=kwargs.get("bm25_weight", 0.4),
+            min_reranker_score=kwargs.get("min_reranker_score"),
+        ),
+        require_final_top_k_within_rerank=True,
+    )
+    initial_state: RAGState = {
+        "db": db,
+        "user_id": user_id,
+        "question": question,
+        "rewritten_question": None,
+        "chat_history": kwargs.get("chat_history") or [],
+        "top_k": retrieval_settings.top_k,
+        "hybrid_top_k": retrieval_settings.hybrid_top_k,
+        "vector_top_k": retrieval_settings.vector_top_k,
+        "bm25_top_k": retrieval_settings.bm25_top_k,
+        "rerank_top_k": retrieval_settings.rerank_top_k,
+        "vector_weight": retrieval_settings.vector_weight,
+        "bm25_weight": retrieval_settings.bm25_weight,
+        "min_reranker_score": retrieval_settings.min_reranker_score,
+        "retrieval_attempts": 0,
+        "max_retrieval_attempts": _validate_attempt_limit(
+            "max_retrieval_attempts", kwargs.get("max_retrieval_attempts") or settings.RAG_MAX_RETRIEVAL_ATTEMPTS
+        ),
+        "generation_attempts": 0,
+        "max_generation_attempts": _validate_attempt_limit(
+            "max_generation_attempts", kwargs.get("max_generation_attempts") or settings.RAG_MAX_GENERATION_ATTEMPTS
+        ),
+        "generation_feedback": None,
+        "user_context": None,
+        "evidence_chunks": [],
+        "evidence_sufficient": None,
+        "evidence_sufficiency_reason": None,
+        "generated_answer": None,
+        "citations": [],
+        "validation_status": None,
+        "validation_reason": None,
+        "grounding_status": None,
+        "grounding_reason": None,
+        "unsupported_claims": [],
+        "final_answer": None,
+        "final_response": None,
+        "model_name": None,
+        "status": None,
+        "error": None,
+    }
+    final_state = await build_async_rag_graph().ainvoke(initial_state)
+    return final_state["final_response"]

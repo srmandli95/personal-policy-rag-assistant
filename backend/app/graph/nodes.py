@@ -7,7 +7,7 @@ from app.generation.citation_guard import (
     check_evidence_sufficiency,
     validate_answer_support,
 )
-from app.generation.llm_client import get_llm_client
+from app.generation.llm_client import LLMRateLimitError, get_aux_llm_client, get_llm_client
 from app.generation.prompt_builder import (
     build_answer_regeneration_prompt,
     build_answer_verification_prompt,
@@ -147,6 +147,26 @@ def rewrite_query_node(state: RAGState) -> RAGState:
     return state
 
 
+async def rewrite_query_node_async(state: RAGState) -> RAGState:
+    """Async provider-I/O variant used by the API workflow."""
+    original_question = state.get("question") or ""
+    chat_history = state.get("chat_history") or []
+    if not chat_history:
+        state["rewritten_question"] = original_question
+        return state
+    try:
+        prompt = build_query_rewrite_prompt(
+            question=original_question,
+            chat_history=chat_history,
+        )
+        rewritten = _extract_llm_text(await get_aux_llm_client().agenerate(prompt)).strip()
+        state["rewritten_question"] = rewritten or original_question
+    except Exception as exc:
+        state["rewritten_question"] = original_question
+        state["error"] = f"Query rewrite failed and fell back to original question: {exc}"
+    return state
+
+
 def refine_retrieval_query_node(state: RAGState) -> RAGState:
     """Create an alternative query after an insufficient retrieval attempt."""
     question = state.get("question") or ""
@@ -177,6 +197,23 @@ def refine_retrieval_query_node(state: RAGState) -> RAGState:
             exc,
         )
 
+    return state
+
+
+async def refine_retrieval_query_node_async(state: RAGState) -> RAGState:
+    question = state.get("question") or ""
+    previous_query = state.get("rewritten_question") or question
+    try:
+        prompt = build_retrieval_retry_prompt(
+            question=question,
+            previous_query=previous_query,
+            attempt=state.get("retrieval_attempts", 0) + 1,
+        )
+        refined = _extract_llm_text(await get_aux_llm_client().agenerate(prompt)).strip()
+        state["rewritten_question"] = refined or question
+    except Exception as exc:
+        state["rewritten_question"] = question
+        state["error"] = f"Retrieval retry query refinement failed: {exc}"
     return state
 
 
@@ -316,6 +353,40 @@ def generate_answer_node(state: RAGState) -> RAGState:
     return state
 
 
+async def generate_answer_node_async(state: RAGState) -> RAGState:
+    if state.get("status") == "refused" or state.get("evidence_sufficient") is False:
+        return generate_answer_node(state)
+    question = state["question"]
+    evidence_chunks = state.get("evidence_chunks", [])
+    attempt = state.get("generation_attempts", 0) + 1
+    state["generation_attempts"] = attempt
+    citations = build_citations_from_evidence(evidence_chunks)
+    if attempt > 1:
+        prompt = build_answer_regeneration_prompt(
+            question=question,
+            evidence_chunks=evidence_chunks,
+            previous_answer=state.get("generated_answer") or "",
+            feedback=state.get("generation_feedback") or "The previous answer was not fully supported.",
+        )
+    else:
+        prompt = build_answer_prompt(question=question, evidence_chunks=evidence_chunks)
+    answer = strip_generated_source_metadata(
+        _extract_llm_text(await get_llm_client().agenerate(prompt))
+    )
+    state.update({
+        "generated_answer": answer,
+        "final_answer": answer,
+        "citations": citations,
+        "status": "answered",
+        "grounding_status": None,
+        "grounding_reason": None,
+        "unsupported_claims": [],
+        "validation_status": None,
+        "validation_reason": None,
+    })
+    return state
+
+
 def verify_answer_grounding_node(state: RAGState) -> RAGState:
     """Verify that the generated answer is supported by retrieved evidence."""
     if state.get("status") == "refused":
@@ -338,6 +409,8 @@ def verify_answer_grounding_node(state: RAGState) -> RAGState:
         llm_client = get_llm_client()
         verifier_response = _extract_llm_text(llm_client.generate(prompt))
         verification_result = _parse_verification_response(verifier_response)
+    except LLMRateLimitError:
+        raise
     except Exception as exc:
         verification_result = {
             "status": "unsupported",
@@ -355,6 +428,32 @@ def verify_answer_grounding_node(state: RAGState) -> RAGState:
         state["grounding_reason"],
     )
 
+    return state
+
+
+async def verify_answer_grounding_node_async(state: RAGState) -> RAGState:
+    if state.get("status") == "refused":
+        return verify_answer_grounding_node(state)
+    try:
+        prompt = build_answer_verification_prompt(
+            question=state["question"],
+            answer=state.get("generated_answer") or "",
+            evidence_chunks=state.get("evidence_chunks", []),
+        )
+        result = _parse_verification_response(
+            _extract_llm_text(await get_aux_llm_client().agenerate(prompt))
+        )
+    except LLMRateLimitError:
+        raise
+    except Exception as exc:
+        result = {
+            "status": "unsupported",
+            "reason": f"Answer grounding verification failed: {exc}",
+            "unsupported_claims": [],
+        }
+    state["grounding_status"] = result["status"]
+    state["grounding_reason"] = result["reason"]
+    state["unsupported_claims"] = result["unsupported_claims"]
     return state
 
 

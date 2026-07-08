@@ -4,6 +4,7 @@ import re
 from typing import Any
 
 import yaml
+from app.config.settings import settings
 
 
 PROMPTS_PATH = Path(__file__).resolve().parents[1] / "config" / "prompts.yaml"
@@ -82,7 +83,9 @@ def build_evidence_context(evidence_chunks: list[dict[str, Any]]) -> str:
     evidence_lines: list[str] = []
 
     for index, chunk in enumerate(evidence_chunks, start=1):
-        chunk_text = chunk.get("chunk_text") or ""
+        chunk_text = str(chunk.get("chunk_text") or "")[
+            : settings.PROMPT_MAX_EVIDENCE_CHARS_PER_CHUNK
+        ]
         document_name = chunk.get("document_name") or chunk.get("original_file_name") or "Unknown document"
         page_number = chunk.get("page_number")
         section_title = chunk.get("section_title")
@@ -111,7 +114,7 @@ def build_evidence_context(evidence_chunks: list[dict[str, Any]]) -> str:
             )
         )
 
-    return "\n\n".join(evidence_lines)
+    return "\n\n".join(evidence_lines)[: settings.PROMPT_MAX_EVIDENCE_CHARS]
 
 
 def build_answer_prompt(

@@ -21,7 +21,7 @@ class EvaluationRun(Base):
     )
     dataset_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
     user_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
-    status: Mapped[str] = mapped_column(String, nullable=False, default="running", index=True)
+    status: Mapped[str] = mapped_column(String, nullable=False, default="pending", index=True)
     settings: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
     result: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
     total: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
@@ -37,4 +37,3 @@ class EvaluationRun(Base):
         default=datetime.utcnow,
         index=True,
     )
-
