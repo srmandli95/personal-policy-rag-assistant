@@ -81,6 +81,32 @@ describe("EvaluationWorkspace", () => {
     expect(screen.getByText("coverage-001")).toBeInTheDocument();
   });
 
+  it("polls worker-mode evaluation runs until results are available", async () => {
+    vi.mocked(api.runEvaluationDataset).mockResolvedValue({
+      ...run,
+      status: "pending",
+      total: 0,
+      passed: 0,
+      failed: 0,
+      pass_rate: 0,
+      results: [],
+      started_at: "",
+      completed_at: null,
+    });
+    vi.mocked(api.listEvaluationRuns)
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([run]);
+
+    render(<EvaluationWorkspace documents={documents} />);
+    await screen.findAllByText("Policy checks");
+
+    fireEvent.click(screen.getByRole("button", { name: "Run evaluation" }));
+
+    expect(await screen.findByText("Evaluation pending...")).toBeInTheDocument();
+
+    expect(await screen.findByText("coverage-001", {}, { timeout: 3000 })).toBeInTheDocument();
+  });
+
   it("uploads a selected JSON dataset", async () => {
     vi.mocked(api.uploadEvaluationDataset).mockResolvedValue({
       ...dataset,
