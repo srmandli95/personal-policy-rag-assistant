@@ -5,7 +5,6 @@ from typing import Any
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
 from pydantic import ValidationError
 from sqlalchemy.orm import Session
-from starlette.concurrency import run_in_threadpool
 
 from app.auth.dependencies import get_current_user
 from app.db.database import get_db
@@ -188,10 +187,9 @@ async def upload_evaluation_dataset(
 
     clean_name, raw_cases = _parse_eval_payload(payload, name)
     user_id = str(current_user.id)
-    cases = await run_in_threadpool(_validate_cases, db, user_id, raw_cases)
+    cases = _validate_cases(db, user_id, raw_cases)
     document_ids = sorted({document_id for case in cases for document_id in case.expected_document_ids})
-    dataset = await run_in_threadpool(
-        create_evaluation_dataset,
+    dataset = create_evaluation_dataset(
         db,
         user_id=user_id,
         name=clean_name,

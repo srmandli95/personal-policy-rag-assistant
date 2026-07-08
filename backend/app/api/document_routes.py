@@ -356,8 +356,7 @@ async def upload_document(
         )
 
     try:
-        document = await run_in_threadpool(
-            create_document_record,
+        document = create_document_record(
             db=db,
             user_id=authenticated_user_id,
             original_file_name=file.filename,
@@ -379,8 +378,7 @@ async def upload_document(
         raise
 
     try:
-        job = await run_in_threadpool(
-            create_processing_job,
+        job = create_processing_job(
             db=db,
             document_id=str(document.id),
             user_id=authenticated_user_id,
@@ -416,7 +414,11 @@ async def upload_document(
     return DocumentUploadResponse(
         **metadata.model_dump(),
         job_id=str(job.id),
-        message="Document uploaded and processing started",
+        message=(
+            "Document uploaded and queued for processing"
+            if settings.JOB_EXECUTION_MODE != "inline"
+            else "Document uploaded and processing started"
+        ),
     )
 
 
