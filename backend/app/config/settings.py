@@ -8,6 +8,10 @@ class Settings(BaseSettings):
     ENABLE_DEBUG_ENDPOINTS: bool = False
     ENABLE_RETRIEVAL_DEBUG_ENDPOINTS: bool = False
 
+    DATABASE_POOL_SIZE: int = 10
+    DATABASE_MAX_OVERFLOW: int = 20
+    DATABASE_POOL_TIMEOUT_SECONDS: int = 30
+
     STORAGE_PROVIDER: str = "local"
 
     DATABASE_URL: str
@@ -29,10 +33,20 @@ class Settings(BaseSettings):
     RERANKER_PROVIDER: str = "local"
     RERANKER_MODEL_NAME: str = "cross-encoder/ms-marco-MiniLM-L6-v2"
     RERANKER_TOP_K: int = 8
+    INFERENCE_MAX_CONCURRENCY: int = 2
+    PRELOAD_LOCAL_MODELS: bool = True
 
     LLM_PROVIDER: str = "openai"
     OPENAI_API_KEY: str | None = None
     OPENAI_MODEL_NAME: str = "gpt-4o-mini"
+    OPENAI_AUX_MODEL_NAME: str = "gpt-4o-mini"
+    OPENAI_MAX_CONCURRENCY: int = 3
+    OPENAI_MAX_RETRIES: int = 4
+    OPENAI_TIMEOUT_SECONDS: float = 60.0
+    OPENAI_ANSWER_MAX_TOKENS: int = 600
+    OPENAI_AUX_MAX_TOKENS: int = 200
+    PROMPT_MAX_EVIDENCE_CHARS_PER_CHUNK: int = 2500
+    PROMPT_MAX_EVIDENCE_CHARS: int = 10000
     ANSWER_TOP_K: int = 5
     RAG_MAX_RETRIEVAL_ATTEMPTS: int = 2
     RAG_MAX_GENERATION_ATTEMPTS: int = 2
@@ -54,6 +68,12 @@ class Settings(BaseSettings):
     MICROSOFT_REDIRECT_URI: str | None = None
 
     MAX_UPLOAD_SIZE_MB: int = 250
+
+    JOB_EXECUTION_MODE: str = "inline"
+    JOB_POLL_INTERVAL_SECONDS: float = 1.0
+    JOB_STALE_AFTER_MINUTES: int = 30
+    API_MAX_CONCURRENT_RAG_REQUESTS: int = 20
+    ASYNC_RAG_WORKFLOW: bool = False
 
     model_config = SettingsConfigDict(
         env_file=".env",
