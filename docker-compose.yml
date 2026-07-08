@@ -29,8 +29,29 @@ services:
       DATABASE_URL: postgresql+psycopg2://personal_policy_rag_assistant:personal_policy_rag_assistant@postgres:5432/personal_policy_rag_assistant
       AUTH_COOKIE_SECURE: ${AUTH_COOKIE_SECURE:-false}
       FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000}
+      JOB_EXECUTION_MODE: worker
+      ASYNC_RAG_WORKFLOW: "true"
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2", "--limit-concurrency", "100", "--timeout-keep-alive", "30"]
     ports:
       - "8000:8000"
+    volumes:
+      - ./data:/app/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  worker:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    command: ["python", "-m", "app.workers.job_worker"]
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql+psycopg2://personal_policy_rag_assistant:personal_policy_rag_assistant@postgres:5432/personal_policy_rag_assistant
+      ASYNC_DATABASE_URL: postgresql+asyncpg://personal_policy_rag_assistant:personal_policy_rag_assistant@postgres:5432/personal_policy_rag_assistant
+      JOB_EXECUTION_MODE: worker
+      PRELOAD_LOCAL_MODELS: "true"
     volumes:
       - ./data:/app/data
     depends_on:
