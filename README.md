@@ -1,213 +1,189 @@
 # Document RAG Framework
 
-Document RAG is a local-first document question-answering application. Users can upload documents, wait for automatic extraction and indexing, ask questions with evidence-backed citations, and run reusable golden evaluation datasets against the RAG workflow.
+Document RAG Framework is a production-oriented retrieval-augmented generation framework for document intelligence products. It provides authenticated document ingestion, PostgreSQL/pgvector indexing, citation-backed question answering, durable background jobs, and golden evaluation workflows that can be adapted for enterprise or domain-specific deployments.
 
-## Features
+The system is structured as a reusable full-stack framework with a React frontend, FastAPI backend, durable worker process, PostgreSQL/pgvector storage, pluggable model services, and OpenAI-backed answer generation. The included Docker Compose setup is the reference development deployment; the architecture is designed to evolve toward managed databases, object storage, horizontal API workers, dedicated job workers, and production observability.
 
-- Google OAuth authentication with user-scoped documents and chat history
-- PDF, DOCX, TXT, Markdown, and HTML ingestion
-- Text extraction, chunking, local embeddings, and PostgreSQL/pgvector storage
-- Hybrid vector and BM25 retrieval
-- Cross-encoder reranking
-- LangGraph orchestration with bounded retrieval and answer-generation retries
-- Grounding verification and citation validation
-- Persistent chat sessions
-- Uploadable golden evaluation datasets with case-level results
+## Core Capabilities
 
-## Architecture
+- Google OAuth sign-in with user-scoped documents, chats, datasets, and runs.
+- Document upload for PDF, DOCX, TXT, Markdown, and HTML files.
+- Durable ingestion pipeline for extraction, chunking, embedding, and indexing.
+- Hybrid retrieval using vector search and BM25 keyword search.
+- Cross-encoder reranking for stronger evidence ordering.
+- LangGraph RAG orchestration with bounded retrieval and generation retries.
+- Citation validation and grounded refusal behavior.
+- Persistent chat sessions and message history.
+- Uploadable golden evaluation datasets with case-level scoring.
+- Docker Compose reference stack with frontend, backend, worker, and PostgreSQL.
+- Clear path to production deployment with externalized secrets, managed persistence, independent worker scaling, HTTPS cookies, and disabled debug surfaces.
+
+## System Overview
 
 ```text
-React + Nginx
-      |
-      v
-FastAPI
-      |
-      v
-LangGraph RAG workflow
-      |
-      +--> Local embedding model
-      +--> BM25 retrieval
-      +--> Cross-encoder reranker
-      +--> OpenAI LLM
-      |
-      v
-PostgreSQL + pgvector
+Browser
+  |
+  v
+React + Nginx frontend
+  |
+  v
+FastAPI backend
+  |                \
+  |                 \ enqueue durable jobs
+  v                  v
+PostgreSQL + pgvector  Worker
+  ^                  |
+  |                  v
+  +---------- ingestion, embeddings, evaluations
+
+Chat requests:
+FastAPI -> LangGraph -> retrieval -> reranking -> OpenAI -> citations -> response
 ```
 
-The Docker Compose stack exposes:
+## Reference Services
 
-| Service | Address | Purpose |
+| Service | Development URL | Purpose |
 | --- | --- | --- |
-| Frontend | `http://localhost:3000` | Browser application and API proxy |
-| Backend | `http://localhost:8000` | FastAPI application |
-| API documentation | `http://localhost:8000/docs` | OpenAPI/Swagger UI |
-| PostgreSQL | `localhost:5432` | Database and vector store |
+| Frontend | `http://localhost:3000` | React workspace and API proxy |
+| Backend API | `http://localhost:8000` | FastAPI routes, auth, chat, documents, evaluations |
+| API docs | `http://localhost:8000/docs` | OpenAPI documentation |
+| PostgreSQL | `localhost:5432` | Relational data and pgvector embeddings |
+| Worker | internal | Durable document-processing and evaluation jobs |
 
-## Prerequisites
+## Development Prerequisites
 
-Install the following before starting:
-
-- Git
 - Docker Desktop with Docker Compose v2
-- A Google Cloud OAuth 2.0 client
-- An OpenAI API key
-- Internet access during the first build and first model load
+- Git
+- Google OAuth 2.0 web client
+- OpenAI API key
+- Internet access during first build and first model download
 
-Recommended local resources:
+Recommended development resources:
 
 - 8 GB RAM minimum
-- 10 GB free disk space for Docker images, model caches, and uploaded documents
+- 10 GB free disk space for Docker images, model cache, uploaded files, and generated artifacts
 
-Node.js, Python, and PostgreSQL do not need to be installed on the host when using the recommended Docker workflow.
+## Development Quick Start
 
-## 1. Clone The Repository
+1. Clone the repository.
 
-```bash
-git clone https://github.com/srmandli95/document-rag-framework.git
-cd document-rag-framework
-```
-
-If the repository is already available locally, run the remaining commands from its root directory, where `docker-compose.yml` and `Makefile` are located.
-
-## 2. Create The Environment File
-
-Copy the provided template:
-
-```bash
-cp .env.example .env
-```
-
-Generate a local JWT secret:
-
-```bash
-openssl rand -hex 32
-```
-
-Open `.env` and configure at least these values:
-
-```dotenv
-OPENAI_API_KEY=your-openai-api-key
-OPENAI_MODEL_NAME=gpt-4o-mini
-
-JWT_SECRET_KEY=replace-with-the-generated-secret
-AUTH_COOKIE_SECURE=false
-FRONTEND_URL=http://localhost:3000
-
-GOOGLE_CLIENT_ID=your-google-client-id
-GOOGLE_CLIENT_SECRET=your-google-client-secret
-GOOGLE_REDIRECT_URI=http://localhost:8000/auth/google/callback
-```
-
-Do not commit `.env`. It contains credentials and application secrets.
-
-### Important Defaults
-
-The values in `.env.example` are configured for Docker Compose:
-
-```dotenv
-DATABASE_URL=postgresql+psycopg2://personal_policy_rag_assistant:personal_policy_rag_assistant@postgres:5432/personal_policy_rag_assistant
-ASYNC_DATABASE_URL=postgresql+asyncpg://personal_policy_rag_assistant:personal_policy_rag_assistant@postgres:5432/personal_policy_rag_assistant
-
-EMBEDDING_MODEL_NAME=sentence-transformers/all-MiniLM-L6-v2
-RERANKER_MODEL_NAME=cross-encoder/ms-marco-MiniLM-L6-v2
-
-MAX_UPLOAD_SIZE_MB=25
-RAG_MAX_RETRIEVAL_ATTEMPTS=2
-RAG_MAX_GENERATION_ATTEMPTS=2
-```
-
-Retry limits must be integers between `1` and `5`.
-
-## 3. Configure Google OAuth
-
-Google OAuth is required to sign in to the browser application.
-
-1. Open the [Google Cloud Console](https://console.cloud.google.com/).
-2. Create or select a Google Cloud project.
-3. Configure the OAuth consent screen.
-4. Create an OAuth client with application type **Web application**.
-5. Add the following authorized redirect URI exactly:
-
-   ```text
-   http://localhost:8000/auth/google/callback
+   ```bash
+   git clone https://github.com/srmandli95/document-rag-framework.git
+   cd document-rag-framework
    ```
 
-6. Copy the generated client ID and client secret into `.env`.
+2. Create the environment file.
 
-If the OAuth consent screen is in testing mode, add the Google accounts that will use the local application as test users.
+   ```bash
+   cp .env.example .env
+   ```
 
-The redirect URI in Google Cloud and `GOOGLE_REDIRECT_URI` must match exactly, including protocol, hostname, port, and path.
+3. Generate a development JWT secret.
 
-## 4. Build And Start The Application
+   ```bash
+   openssl rand -hex 32
+   ```
 
-Build all images and start the services in the background:
+4. Update `.env` with at least:
 
-```bash
-make build
+   ```dotenv
+   OPENAI_API_KEY=your-openai-api-key
+   OPENAI_MODEL_NAME=gpt-4o-mini
+
+   JWT_SECRET_KEY=replace-with-generated-secret
+   AUTH_COOKIE_SECURE=false
+   FRONTEND_URL=http://localhost:3000
+
+   GOOGLE_CLIENT_ID=your-google-client-id
+   GOOGLE_CLIENT_SECRET=your-google-client-secret
+   GOOGLE_REDIRECT_URI=http://localhost:8000/auth/google/callback
+   ```
+
+5. Build and start the stack.
+
+   ```bash
+   make build
+   ```
+
+6. Open the development workspace.
+
+   ```text
+   http://localhost:3000
+   ```
+
+## Google OAuth Setup
+
+Create a Google OAuth web application in Google Cloud Console and configure this authorized redirect URI exactly:
+
+```text
+http://localhost:8000/auth/google/callback
 ```
 
-Equivalent Docker command:
+The URI configured in Google Cloud must match `GOOGLE_REDIRECT_URI` in `.env`, including protocol, host, port, and path.
 
-```bash
-docker compose up -d --build
-```
+## Production Deployment Model
 
-The first build can take several minutes because it installs Python, frontend, and machine-learning dependencies.
+The current repository ships with a Docker Compose reference deployment, but the runtime boundaries are intentionally production-shaped:
 
-Check service status:
+- Serve the React build through a CDN or managed static hosting layer, or keep Nginx as an edge container behind a load balancer.
+- Run the FastAPI backend as horizontally scalable API workers behind HTTPS.
+- Run one or more dedicated worker replicas for document processing and evaluation workloads.
+- Use a managed PostgreSQL service with pgvector enabled, connection pooling, backups, and monitoring.
+- Move uploaded files and derived artifacts from local filesystem storage to object storage through the storage abstraction.
+- Store secrets in a cloud secrets manager rather than `.env`.
+- Set `AUTH_COOKIE_SECURE=true` and terminate TLS at the ingress/load balancer.
+- Keep retrieval debug endpoints disabled except in controlled environments.
+- Add metrics, traces, structured logs, and queue-depth dashboards before operating at scale.
+
+## Common Commands
+
+Run these from the repository root.
+
+| Command | Description |
+| --- | --- |
+| `make build` | Build images and start the stack |
+| `make run` | Start existing images |
+| `make stop` | Stop the stack |
+| `make logs` | Follow all Docker Compose logs |
+| `make health` | Call the backend health endpoint |
+| `make test` | Run backend tests inside the backend container |
+
+Useful direct Docker commands:
 
 ```bash
 docker compose ps
+docker compose logs -f backend
+docker compose logs -f worker
+docker compose up -d --build backend worker
+docker compose up -d --build frontend
 ```
 
-All three services should be running. PostgreSQL should report `healthy`.
+## Using The Application
 
-Verify the backend:
+### Knowledge Base
 
-```bash
-make health
-```
+1. Sign in with Google.
+2. Open the **Knowledge Base** tab.
+3. Upload a supported file type.
+4. Wait for the document status to become `ready`.
 
-Expected response:
+Document processing is asynchronous in Docker Compose. The backend creates a processing job and the worker claims it, extracts text, chunks content, embeds chunks, and stores vectors in PostgreSQL.
 
-```json
-{"status":"ok","service":"personal-policy-rag-assistant"}
-```
-
-## 5. Open And Use The Application
-
-Open:
-
-```text
-http://localhost:3000
-```
-
-Select **Continue with Google** and complete the OAuth flow.
-
-### Add Documents
-
-1. Open the **Knowledge Base** tab.
-2. Upload a PDF, DOCX, TXT, Markdown, or HTML file.
-3. Wait for its status to become `ready`.
-
-Document processing runs through validation, extraction, chunking, and embedding. The first embedding operation may take longer while the local sentence-transformer model is downloaded and initialized.
-
-### Ask Questions
+### Chat
 
 1. Open the **Chat** tab.
-2. Enter a question covered by the uploaded documents.
-3. Review the generated answer and its source citations.
+2. Ask a question covered by ready documents.
+3. Review the answer and citations.
 
-The LangGraph workflow can retry retrieval with a refined query when evidence is insufficient. It can also regenerate an unsupported answer using verifier feedback. When attempts are exhausted, the workflow returns a refusal instead of an unsupported answer.
+The RAG graph can rewrite queries, retrieve evidence, rerank candidates, generate an answer, validate support, and retry within configured bounds. If the system cannot ground an answer, it should refuse instead of fabricating unsupported details.
 
-### Run Evaluations
+### Evaluations
 
 1. Open the **Evaluations** tab.
-2. Copy the IDs of the ready documents referenced by the evaluation.
+2. Copy ready document IDs.
 3. Download the JSON template.
-4. Add supported and refusal cases.
-5. Upload the completed JSON dataset.
-6. Select the dataset and run the evaluation.
+4. Upload a golden evaluation dataset.
+5. Run the selected dataset.
 
 Example dataset:
 
@@ -220,7 +196,7 @@ Example dataset:
       "category": "general",
       "question": "What benefit does this policy provide?",
       "expected_answer_contains": ["expected phrase"],
-      "expected_document_ids": ["replace-with-a-ready-document-id"],
+      "expected_document_ids": ["replace-with-ready-document-id"],
       "expected_refusal": false
     },
     {
@@ -237,164 +213,103 @@ Example dataset:
 
 Supported cases require at least one ready document ID. Refusal cases must use an empty `expected_document_ids` list.
 
-## Common Commands
+## Configuration Highlights
 
-Run these commands from the repository root:
-
-| Command | Description |
+| Setting | Purpose |
 | --- | --- |
-| `make build` | Build images and start/recreate the complete stack |
-| `make run` | Start existing images without rebuilding |
-| `make stop` | Stop the Docker Compose stack |
-| `make logs` | Follow logs from all services |
-| `make health` | Call the backend health endpoint |
-| `make test` | Run the complete backend test suite in Docker |
-
-Useful Docker commands:
-
-```bash
-# Follow backend logs only
-docker compose logs -f backend
-
-# Follow frontend proxy logs only
-docker compose logs -f frontend
-
-# Restart one service
-docker compose restart backend
-
-# Rebuild one service
-docker compose up -d --build frontend
-```
-
-## Run Tests
-
-The services must be running before using the Make target:
-
-```bash
-make test
-```
-
-Run frontend tests and a production build directly when Node.js is installed locally:
-
-```bash
-cd frontend
-npm ci
-npm test -- --run
-npm run build
-```
+| `DATABASE_URL` | Synchronous SQLAlchemy connection for most backend and worker persistence |
+| `ASYNC_DATABASE_URL` | Async SQLAlchemy connection for async chat persistence paths |
+| `JOB_EXECUTION_MODE` | `worker` in Docker Compose, `inline` default for development/tests |
+| `ASYNC_RAG_WORKFLOW` | Enables async LangGraph request handling |
+| `MAX_UPLOAD_SIZE_MB` | Backend upload limit |
+| `EMBEDDING_MODEL_NAME` | Sentence-transformer embedding model used by the default embedding provider |
+| `RERANKER_MODEL_NAME` | Cross-encoder reranker model used by the default reranking provider |
+| `OPENAI_MODEL_NAME` | Main answer-generation model |
+| `OPENAI_AUX_MODEL_NAME` | Auxiliary query rewrite and support-check model |
 
 ## Data Persistence
 
-PostgreSQL data is stored in the Docker volume `postgres_data`. Uploaded and generated document files are stored under the repository's `data/` directory through a bind mount.
+- PostgreSQL data is stored in the Docker volume `postgres_data`.
+- Uploaded and generated document artifacts are stored in the repository `data/` directory.
+- Stopping the stack does not delete stored data.
 
-Stopping services does not delete this data:
+To stop services:
 
 ```bash
 make stop
 ```
 
-To remove containers and permanently delete the PostgreSQL volume:
+To remove containers and the PostgreSQL volume:
 
 ```bash
 docker compose down -v
 ```
 
-This destructive command removes local users, document records, chunks, embeddings, chat history, evaluation datasets, and evaluation runs. Files under `data/` must be removed separately if a completely clean file store is required.
+This removes persisted database records, embeddings, chat history, evaluation datasets, and evaluation runs. Files under `data/` may need to be removed separately for a fully clean workspace.
 
-## Optional Debug Endpoints
+## Testing
 
-Retrieval and evidence inspection endpoints are disabled by default. Enable them locally by adding these values to `.env`:
-
-```dotenv
-ENABLE_DEBUG_ENDPOINTS=true
-ENABLE_RETRIEVAL_DEBUG_ENDPOINTS=true
-```
-
-Rebuild the backend after changing the flags:
+Backend tests in Docker:
 
 ```bash
-docker compose up -d --build backend
+make test
 ```
 
-Do not enable debug endpoints in an untrusted production environment.
+Targeted backend tests with the repository virtual environment:
+
+```bash
+PYTHONPATH=backend .venv/bin/pytest backend/tests/test_job_worker.py -q
+```
+
+Frontend tests:
+
+```bash
+cd frontend
+npm test -- --run
+```
 
 ## Troubleshooting
 
-### Google reports a redirect URI mismatch
+### Document stays in processing
 
-Confirm both locations use exactly:
+Check the worker first:
+
+```bash
+docker compose ps
+docker compose logs --tail=300 worker
+```
+
+The worker is responsible for document extraction, chunking, embedding, and worker-mode evaluation runs.
+
+### Evaluation run stays pending or running
+
+Check worker logs and recent evaluation run rows:
+
+```bash
+docker compose logs --tail=300 worker
+```
+
+Also refresh the frontend after rebuilding, because production frontend assets are served by Nginx.
+
+### OAuth redirect mismatch
+
+Confirm Google Cloud and `.env` both use:
 
 ```text
 http://localhost:8000/auth/google/callback
 ```
 
-Check the Google OAuth client configuration and `GOOGLE_REDIRECT_URI` in `.env`.
+### OpenAI request failures
 
-### Login reports that Google OAuth is not configured
-
-Confirm these values are present and non-empty in `.env`:
-
-```dotenv
-GOOGLE_CLIENT_ID=
-GOOGLE_CLIENT_SECRET=
-GOOGLE_REDIRECT_URI=http://localhost:8000/auth/google/callback
-```
-
-Then rebuild the backend:
-
-```bash
-docker compose up -d --build backend
-```
-
-### Answers fail because the OpenAI client is not configured
-
-Set a valid `OPENAI_API_KEY` in `.env` and restart the backend:
+Confirm `OPENAI_API_KEY` is present and restart the backend:
 
 ```bash
 docker compose restart backend
 ```
 
-### The first query or document takes a long time
+### First model operation is slow
 
-The local embedding and cross-encoder models are downloaded from Hugging Face on first use. Follow backend logs to monitor progress:
-
-```bash
-docker compose logs -f backend
-```
-
-### Upload returns HTTP 413
-
-The backend enforces `MAX_UPLOAD_SIZE_MB`. The Nginx proxy also has a 250 MB request limit. Ensure the file is below both limits. After changing the backend limit, rebuild the backend.
-
-### A document remains in processing or changes to failed
-
-Inspect the background processing logs:
-
-```bash
-docker compose logs --tail=300 backend
-```
-
-Look for the document name, processing job ID, or messages from extraction, chunking, and embedding.
-
-### A required port is already in use
-
-Check ports `3000`, `8000`, and `5432`:
-
-```bash
-lsof -i :3000
-lsof -i :8000
-lsof -i :5432
-```
-
-Stop the conflicting process or update the host-side port mapping in `docker-compose.yml`.
-
-### Docker is using an outdated image
-
-Force a rebuild:
-
-```bash
-docker compose up -d --build
-```
+The default embedding and reranking models may be downloaded from Hugging Face on first use. Watch backend or worker logs during the first run.
 
 ## Project Layout
 
@@ -402,26 +317,30 @@ docker compose up -d --build
 backend/
   app/
     api/           FastAPI routes
-    evaluation/    RAG evaluation metrics and runner
-    generation/    prompts, LLM client, and citation guard
-    graph/         LangGraph state, nodes, and routing
-    ingestion/     extraction, chunking, and indexing pipeline
-    models/        SQLAlchemy database models
-    repositories/  persistence operations
-    retrieval/     vector, BM25, and hybrid retrieval
-    reranking/     cross-encoder reranking
-    schemas/       API request and response models
-    storage/       file-storage implementations
+    auth/          OAuth, cookies, JWT helpers, auth dependencies
+    db/            SQLAlchemy engines, sessions, migrations
+    evaluation/    Golden dataset models, runner, metrics
+    generation/    LLM client, prompts, answer generation, citation guard
+    graph/         LangGraph RAG state, nodes, workflow
+    ingestion/     loaders, extraction, chunking, embedding indexing
+    models/        SQLAlchemy ORM models
+    repositories/  Persistence helpers
+    retrieval/     Vector, BM25, hybrid retrieval, diagnostics
+    reranking/     Cross-encoder reranker
+    schemas/       Pydantic API schemas
+    storage/       File-storage abstraction and local implementation
+    workers/       Durable job worker
 frontend/
-  src/             React application
-scripts/           database initialization scripts
-data/              local uploaded and generated files
+  src/             React workspace, API client, components, tests
+scripts/           Database initialization scripts
+data/              Development uploaded and generated files
+docs/              Architecture and technical design documents
 ```
 
 ## Security Notes
 
-- Never commit `.env`, OAuth client secrets, OpenAI keys, or production JWT secrets.
-- Use `AUTH_COOKIE_SECURE=true` behind HTTPS in production.
-- Store production secrets in a secrets manager.
-- Keep debug endpoints disabled in production.
-- Replace the development database credentials before deploying outside a local environment.
+- Do not commit `.env`, OAuth secrets, OpenAI keys, or production JWT secrets.
+- Use `AUTH_COOKIE_SECURE=true` behind HTTPS.
+- Keep debug endpoints disabled in untrusted environments.
+- Replace development database credentials before deploying outside a controlled development environment.
+- Scope user data through authenticated user IDs on every document, chat, dataset, and evaluation route.
