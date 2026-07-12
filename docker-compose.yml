@@ -31,6 +31,7 @@ services:
       FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000}
       JOB_EXECUTION_MODE: worker
       ASYNC_RAG_WORKFLOW: "true"
+      PRELOAD_LOCAL_MODELS: "false"
     command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2", "--limit-concurrency", "100", "--timeout-keep-alive", "30"]
     ports:
       - "8000:8000"
@@ -39,6 +40,12 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=2).read()"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
 
   worker:
     build:
@@ -66,7 +73,8 @@ services:
     ports:
       - "3000:80"
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
 
 volumes:
   postgres_data:
